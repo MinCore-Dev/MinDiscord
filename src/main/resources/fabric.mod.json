@@ -14,5 +14,9 @@
     "fabric-api": "*",
     "mincore": ">=0.2.0"
   },
+  "suggests": {
+    "luckperms": "*",
+    "fabric-permissions-api-v0": "*"
+  },
   "contact": { "sources": "https://github.com/your/repo" }
 }
