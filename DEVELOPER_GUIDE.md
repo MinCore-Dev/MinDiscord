@@ -48,8 +48,10 @@ dev.mindiscord.api.MinDiscordApi.bus().ifPresent(bus -> bus.send("rareDrops", ms
 - Ask the server owner which routes exist (e.g., `eventAnnouncements`, `eventStarts`, `eventWinners`, `rareDrops`).
 - Routes may point at fixed URLs or `env:VARNAME` placeholders. If the environment variable is missing you will receive
   `BAD_ROUTE` (nothing is sent).
-- Unknown routes fall back to `default` (when configured) and produce `BAD_ROUTE_FALLBACK`. The payload is delivered via the
-  default route so you can log and notify ops.
+- Routes must also be whitelisted by `announce.allowedRoutes`; if a route is not enabled there you will receive
+  `ROUTE_DISABLED` without contacting Discord.
+- Unknown but allowed routes fall back to `default` (when configured) and produce `BAD_ROUTE_FALLBACK`. The payload is delivered
+  via the default route so you can log and notify ops.
 - MinDiscord maintains a per-route token bucket. Bursts over the configured capacity are queued until tokens refill; if the
   queue is full your send completes with `QUEUE_FULL`.
 
@@ -63,8 +65,10 @@ bus.send("eventAnnouncements", "hello").thenAccept(result -> {
 });
 ```
 
-Possible codes: `OK`, `BAD_ROUTE_FALLBACK`, `BAD_ROUTE`, `BAD_PAYLOAD`, `QUEUE_FULL`, `DISCORD_429`, `DISCORD_5XX`,
-`NETWORK_IO`, `GIVE_UP`.
+Possible codes: `OK`, `BAD_ROUTE_FALLBACK`, `BAD_ROUTE`, `ROUTE_DISABLED`, `BAD_PAYLOAD`, `QUEUE_FULL`, `DISCORD_429`,
+`DISCORD_5XX`, `NETWORK_IO`, `DISABLED`, `GIVE_UP`.
+
+- When `core.enabled=false` or `announce.enabled=false`, sends resolve to `DISABLED` immediately.
 
 - `SendResult.requestId()` is a UUID; ops can correlate it with MinCore ledger entries (`idemKey = "send:" + requestId`).
 - Retries are handled for you. After `maxAttempts` MinDiscord gives up with `GIVE_UP` and includes the last failure reason in
@@ -81,6 +85,9 @@ All sends are asynchronous and off the server main thread. You can call MinDisco
 - Avoid `@everyone`/role pings unless the server owner requested it. Configure mentions in MinDiscord routing if needed.
 - Max 10 embeds per message, 25 fields per embed, field names ≤256 chars, values ≤1024 chars, footer text ≤2048 chars,
   author names ≤256 chars. MinDiscord validates these limits and returns `BAD_PAYLOAD` if exceeded.
+
+- Commands (and server operators) use the `permissions.admin` node from the config. MinDiscord prefers MinCore's permission
+  gateway, falling back to LuckPerms → Fabric Permissions API → vanilla OP level when MinCore's helper is absent.
 
 
 ## Dependency Notes

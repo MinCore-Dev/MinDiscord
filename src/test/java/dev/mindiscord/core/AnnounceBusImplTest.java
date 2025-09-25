@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import dev.mindiscord.api.SendResult;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -23,7 +24,11 @@ class AnnounceBusImplTest {
 
   @Test
   void unknownRouteWithoutDefaultReturnsBadRoute() throws Exception {
-    Config cfg = Config.builder().putRoute("known", "https://example/known").build();
+    Config cfg =
+        Config.builder()
+            .announce(new Config.Announce(true, false, List.of("missing", "known")))
+            .putRoute("known", "https://example/known")
+            .build();
     bus = buildBus(cfg, new SuccessTransport());
     SendResult result = bus.send("missing", "hello").get(1, TimeUnit.SECONDS);
     assertFalse(result.ok());
@@ -32,7 +37,11 @@ class AnnounceBusImplTest {
 
   @Test
   void fallbackToDefaultReturnsBadRouteFallback() throws Exception {
-    Config cfg = Config.builder().putRoute("default", "https://example/default").build();
+    Config cfg =
+        Config.builder()
+            .announce(new Config.Announce(true, true, List.of("default", "missing")))
+            .putRoute("default", "https://example/default")
+            .build();
     RecordingTransport transport = new RecordingTransport();
     bus = buildBus(cfg, transport);
     SendResult result = bus.send("missing", "hello").get(1, TimeUnit.SECONDS);
@@ -46,7 +55,7 @@ class AnnounceBusImplTest {
     Config cfg =
         Config.builder()
             .putRoute("default", "https://example/default")
-            .retry(new Config.Retry(2, Duration.ofMillis(1), Duration.ofMillis(2), false))
+            .transport(new Config.Transport(3000, 5000, 2))
             .build();
     FailingTransport transport = new FailingTransport();
     FakeTimeSource time = new FakeTimeSource();
@@ -66,6 +75,45 @@ class AnnounceBusImplTest {
     SendResult result = bus.send("default", "msg").get(1, TimeUnit.SECONDS);
     assertFalse(result.ok());
     assertEquals("GIVE_UP", result.code());
+  }
+
+  @Test
+  void announceDisabledBlocksSend() throws Exception {
+    Config cfg =
+        Config.builder()
+            .announce(new Config.Announce(false, true, List.of("default")))
+            .putRoute("default", "https://example/default")
+            .build();
+    bus = buildBus(cfg, new SuccessTransport());
+    SendResult result = bus.send("default", "test").get(1, TimeUnit.SECONDS);
+    assertFalse(result.ok());
+    assertEquals("DISABLED", result.code());
+  }
+
+  @Test
+  void fallbackDisabledReturnsBadRoute() throws Exception {
+    Config cfg =
+        Config.builder()
+            .announce(new Config.Announce(true, false, List.of("default", "missing")))
+            .putRoute("default", "https://example/default")
+            .build();
+    bus = buildBus(cfg, new SuccessTransport());
+    SendResult result = bus.send("missing", "test").get(1, TimeUnit.SECONDS);
+    assertFalse(result.ok());
+    assertEquals("BAD_ROUTE", result.code());
+  }
+
+  @Test
+  void disallowedRouteReturnsRouteDisabled() throws Exception {
+    Config cfg =
+        Config.builder()
+            .announce(new Config.Announce(true, true, List.of("default")))
+            .putRoute("default", "https://example/default")
+            .build();
+    bus = buildBus(cfg, new SuccessTransport());
+    SendResult result = bus.send("blocked", "test").get(1, TimeUnit.SECONDS);
+    assertFalse(result.ok());
+    assertEquals("ROUTE_DISABLED", result.code());
   }
 
   private AnnounceBusImpl buildBus(Config config, WebhookClient transport) {

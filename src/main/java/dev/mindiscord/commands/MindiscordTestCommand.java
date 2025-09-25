@@ -3,6 +3,7 @@ package dev.mindiscord.commands;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import dev.mindiscord.api.SendResult;
+import dev.mindiscord.core.Config;
 import dev.mindiscord.core.MinDiscordRuntime;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -26,6 +27,27 @@ public final class MindiscordTestCommand {
   private static int execute(
       ServerCommandSource source, MinDiscordRuntime runtime, String route, String text) {
     if (!CommandRegistrar.tryConsumeCooldown(source)) {
+      return 0;
+    }
+    Config cfg = runtime.config();
+    if (!cfg.core().enabled()) {
+      source.sendError(Text.literal("MinDiscord disabled via config"));
+      CommandRegistrar.logCommand(runtime, "test", false, "DISABLED");
+      return 0;
+    }
+    if (!cfg.commands().testEnabled()) {
+      source.sendError(Text.literal("Test command disabled via config"));
+      CommandRegistrar.logCommand(runtime, "test", false, "DISABLED");
+      return 0;
+    }
+    if (!cfg.announce().enabled()) {
+      source.sendError(Text.literal("Announcements disabled via config"));
+      CommandRegistrar.logCommand(runtime, "test", false, "DISABLED");
+      return 0;
+    }
+    if (!cfg.announce().isRouteAllowed(route)) {
+      source.sendError(Text.literal("Route not allowed by configuration"));
+      CommandRegistrar.logCommand(runtime, "test", false, "ROUTE_DISABLED");
       return 0;
     }
     source.sendFeedback(() -> Text.literal("Dispatching test message…"), false);

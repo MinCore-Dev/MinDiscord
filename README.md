@@ -6,11 +6,12 @@ A tiny, ops-friendly Discord **webhook** announcer for Fabric servers. Plugins c
 ## Features
 - Webhook-only transport (no JDA), tiny runtime footprint
 - Shared **AnnounceBus** API for every plugin – no token sharing or HTTP boilerplate
-- Hot-reloadable routing via `mindiscord.json5`, including `env:` secrets
+- Hot-reloadable routing via `mindiscord.json5`, including `env:` secrets and per-feature toggles
 - Bounded queue with selectable overflow policy + token-bucket rate limiting per route
 - Exponential retries with 429 `Retry-After` handling and jittered backoff
 - **MinCore** ledger integration (`mindiscord` addon/op=`announce`) and optional per-route stats table
 - Operator commands: `/mindiscord routes`, `/mindiscord test`, `/mindiscord diag`
+- LuckPerms-first permission gateway (MinCore → LuckPerms → Fabric Permissions → vanilla OP)
 
 ## Requirements
 - Fabric 1.21.8 (server), Java 21
@@ -25,28 +26,49 @@ A tiny, ops-friendly Discord **webhook** announcer for Fabric servers. Plugins c
 ## Config (example)
 ```json5
 {
-  mode: "webhook",
-  routes: {
-    default:            "https://discord.com/api/webhooks/GGGG/HHH",
-    eventAnnouncements: "env:MINDISCORD_WEBHOOK_ANNOUNCE",
-    eventStarts:        "https://discord.com/api/webhooks/AAAA/BBB",
-    eventWinners:       "https://discord.com/api/webhooks/CCCC/DDD",
-    rareDrops:          "https://discord.com/api/webhooks/EEEE/FFF"
+  core: {
+    enabled: true,
+    redactUrlsInCommands: true,
+    hotReload: true
   },
-  defaults: { username: "MinDiscord", avatarUrl: "" },
-  queue: { maxSize: 2000, onOverflow: "dropOldest" },
-  retry: { maxAttempts: 6, baseDelayMs: 500, maxDelayMs: 15000, jitter: true },
-  ratelimit: { perRouteBurst: 10, perRouteRefillPerSec: 5 },
-  log: { level: "INFO", json: false }
+  routes: {
+    default: "env:DISCORD_WEBHOOK_DEFAULT",
+    eventAnnouncements: "env:DISCORD_WEBHOOK_EVENTS",
+    rareDrops: "https://discord.com/api/webhooks/RARE/DROPS"
+  },
+  announce: {
+    enabled: true,
+    allowFallbackToDefault: true,
+    allowedRoutes: ["default", "eventAnnouncements", "rareDrops"]
+  },
+  rateLimit: {
+    perRoute: {
+      default: { tokensPerMinute: 20, burst: 10 },
+      rareDrops: { tokensPerMinute: 6, burst: 3 }
+    },
+    overflowPolicy: "dropOldest"
+  },
+  queue: { capacity: 512, workerThreads: 1 },
+  transport: { connectTimeoutMs: 3000, readTimeoutMs: 5000, maxAttempts: 4 },
+  commands: {
+    routes: { enabled: true },
+    test: { enabled: true },
+    diag: { enabled: true }
+  },
+  permissions: { admin: "mindiscord.admin" }
 }
 ```
 
-### Routing & hot reload
-- `mindiscord.json5` is watched at runtime – edits are applied without rebooting.
-- Values starting with `env:` (e.g. `env:MINDISCORD_WEBHOOK_ANNOUNCE`) are resolved from the server
+### Routing, toggles & hot reload
+- `mindiscord.json5` is watched at runtime – edits are applied without rebooting unless
+  both the previous and new configs set `core.hotReload=false`.
+- `core.enabled=false` returns `DISABLED` for all commands and sends.
+- `announce.enabled=false` blocks announcement sends; `announce.allowedRoutes` restricts the set of
+  valid route names (others return `ROUTE_DISABLED`). When `allowFallbackToDefault=true`, unknown but
+  allowed routes fall back to `default` and surface `BAD_ROUTE_FALLBACK`.
+- Values starting with `env:` (e.g. `env:DISCORD_WEBHOOK_EVENTS`) are resolved from the server
   environment; missing variables result in `BAD_ROUTE` responses.
-- Unknown routes fall back to `default` (when configured) and report `BAD_ROUTE_FALLBACK` so plugins
-  can log that the fallback was used.
+- `/mindiscord routes` respects `core.redactUrlsInCommands` when showing webhook URLs.
 
 ### Queue, workers & retries
 - A single worker thread drains a bounded queue; overflow policy is configurable (`dropOldest`,
@@ -59,8 +81,8 @@ A tiny, ops-friendly Discord **webhook** announcer for Fabric servers. Plugins c
 ### Commands
 | Command | Description |
 | --- | --- |
-| `/mindiscord routes` | Lists configured routes, showing `env:` status without leaking tokens. |
-| `/mindiscord test <route> <text>` | Asynchronously sends a one-line test message via the route. |
+| `/mindiscord routes` | Lists configured routes, showing `env:` status and redacting URLs when configured. |
+| `/mindiscord test <route> <text>` | Asynchronously sends a one-line test message via the route (subject to toggles). |
 | `/mindiscord diag` | Shows queue depth and the last success/failure per route. |
 
 All commands are rate-limited (2 s per sender) and log to the MinCore ledger with reason `command`.
@@ -68,8 +90,8 @@ All commands are rate-limited (2 s per sender) and log to the MinCore ledger wit
 ### Result codes
 `SendResult.code` (and the ledger code) may be one of:
 
-`OK`, `BAD_ROUTE_FALLBACK`, `BAD_ROUTE`, `BAD_PAYLOAD`, `QUEUE_FULL`, `DISCORD_429`, `DISCORD_5XX`,
-`NETWORK_IO`, `GIVE_UP`.
+`OK`, `BAD_ROUTE_FALLBACK`, `BAD_ROUTE`, `ROUTE_DISABLED`, `BAD_PAYLOAD`, `QUEUE_FULL`, `DISCORD_429`,
+`DISCORD_5XX`, `NETWORK_IO`, `DISABLED`, `GIVE_UP`.
 
 ### Ledger & optional stats
 - Every accepted send logs to MinCore with addon `mindiscord`, op `announce`, and a compact

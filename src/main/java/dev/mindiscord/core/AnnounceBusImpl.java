@@ -28,6 +28,10 @@ public final class AnnounceBusImpl implements AnnounceBus, AutoCloseable {
   private static final ObjectMapper JSON =
       new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
 
+  private static final Duration DEFAULT_RETRY_BASE = Duration.ofMillis(500);
+  private static final Duration DEFAULT_RETRY_MAX = Duration.ofMillis(15_000);
+  private static final boolean DEFAULT_RETRY_JITTER = true;
+
   private final Router router;
   private final DispatchQueue queue;
   private final WebhookClient transport;
@@ -72,9 +76,10 @@ public final class AnnounceBusImpl implements AnnounceBus, AutoCloseable {
     Objects.requireNonNull(config, "config");
     this.config = config;
     router.update(config);
-    queue.configure(config.queue().maxSize(), config.queue().onOverflow());
-    rateLimiter.configure(config.ratelimit().perRouteBurst(), config.ratelimit().perRouteRefillPerSec());
-    worker.updateRetry(config.retry());
+    queue.configure(config.queue().capacity(), config.queue().overflowPolicy());
+    rateLimiter.configure(config.rateLimit());
+    transport.configure(config.transport());
+    worker.updateTransport(config.transport());
   }
 
   @Override
@@ -92,20 +97,38 @@ public final class AnnounceBusImpl implements AnnounceBus, AutoCloseable {
           new SendResult(false, "GIVE_UP", "MinDiscord shutting down", UUID.randomUUID().toString()));
     }
     Config cfg = this.config;
+    UUID requestId = UUID.randomUUID();
+    if (!cfg.core().enabled()) {
+      return CompletableFuture.completedFuture(
+          new SendResult(false, "DISABLED", "MinDiscord disabled via config", requestId.toString()));
+    }
+    if (!cfg.announce().enabled()) {
+      return CompletableFuture.completedFuture(
+          new SendResult(false, "DISABLED", "Announcements disabled via config", requestId.toString()));
+    }
     WebhookMessage normalized = normalize(message, cfg.defaults());
     String validationError = validate(normalized);
-    UUID requestId = UUID.randomUUID();
     if (validationError != null) {
       return CompletableFuture.completedFuture(
           new SendResult(false, "BAD_PAYLOAD", validationError, requestId.toString()));
     }
+    if (!cfg.announce().isRouteAllowed(route)) {
+      return CompletableFuture.completedFuture(
+          new SendResult(false, "ROUTE_DISABLED", "Route not allowed by configuration", requestId.toString()));
+    }
     Router.RouteResolution resolution = router.resolve(route);
     if (!resolution.ok()) {
-      String code = resolution.status() == Router.Status.ENV_MISSING ? "BAD_ROUTE" : "BAD_ROUTE";
-      String messageText =
-          resolution.status() == Router.Status.ENV_MISSING
-              ? "Route " + resolution.resolvedRoute() + " missing env:" + resolution.envVariable()
-              : "Unknown route: " + resolution.requestedRoute();
+      String code = "BAD_ROUTE";
+      String messageText;
+      if (resolution.status() == Router.Status.ENV_MISSING) {
+        messageText =
+            "Route "
+                + resolution.requestedRoute()
+                + " missing env:"
+                + Objects.requireNonNullElse(resolution.envVariable(), "");
+      } else {
+        messageText = "Unknown route: " + resolution.requestedRoute();
+      }
       return CompletableFuture.completedFuture(
           new SendResult(false, code, messageText, requestId.toString()));
     }
@@ -151,7 +174,8 @@ public final class AnnounceBusImpl implements AnnounceBus, AutoCloseable {
 
   public DiagnosticsSnapshot diagnostics() {
     Config cfg = this.config;
-    return new DiagnosticsSnapshot(queue.size(), cfg.queue().maxSize(), Map.copyOf(diagnostics.snapshot()));
+    return new DiagnosticsSnapshot(
+        queue.size(), cfg.queue().capacity(), Map.copyOf(diagnostics.snapshot()));
   }
 
   public List<Router.RouteInfo> routes() { return new ArrayList<>(router.snapshot()); }
@@ -343,9 +367,11 @@ public final class AnnounceBusImpl implements AnnounceBus, AutoCloseable {
 
   private final class SendWorker implements Runnable {
     private volatile boolean running = true;
-    private volatile Config.Retry retry = Config.Retry.DEFAULTS;
+    private volatile Config.Transport transportConfig = Config.Transport.DEFAULTS;
 
-    void updateRetry(Config.Retry retry) { this.retry = retry; }
+    void updateTransport(Config.Transport transport) {
+      this.transportConfig = transport;
+    }
 
     void stop() { running = false; }
 
@@ -373,7 +399,7 @@ public final class AnnounceBusImpl implements AnnounceBus, AutoCloseable {
         if (!wait.isZero()) {
           sleeper.sleep(wait);
         }
-        DeliveryResult result = deliver(request, retry);
+        DeliveryResult result = deliver(request, transportConfig);
         request.future.complete(result.result());
         if (result.success()) {
           diagnostics.recordSuccess(request.resolvedRoute, timeSource.now(), result.result().message());
@@ -409,13 +435,16 @@ public final class AnnounceBusImpl implements AnnounceBus, AutoCloseable {
       }
     }
 
-    private DeliveryResult deliver(PendingRequest request, Config.Retry retry) throws InterruptedException {
-      Duration delay = retry.baseDelay();
-      int attempts = retry.maxAttempts();
+    private DeliveryResult deliver(PendingRequest request, Config.Transport transportConfig)
+        throws InterruptedException {
+      Duration delay = DEFAULT_RETRY_BASE;
+      Duration maxDelay = DEFAULT_RETRY_MAX;
+      int attempts = transportConfig.maxAttempts();
       String lastCode = null;
       String lastMessage = null;
       for (int attempt = 1; attempt <= attempts; attempt++) {
-        WebhookTransport.TransportResponse response = transport.postJson(request.url, request.jsonPayload);
+        WebhookTransport.TransportResponse response =
+            AnnounceBusImpl.this.transport.postJson(request.url, request.jsonPayload);
         if (response.success()) {
           String code = request.fallback ? "BAD_ROUTE_FALLBACK" : "OK";
           String msg =
@@ -433,10 +462,10 @@ public final class AnnounceBusImpl implements AnnounceBus, AutoCloseable {
           }
           Duration wait = response.retryAfter();
           if (wait == null || wait.isZero() || wait.isNegative()) {
-            wait = applyJitter(delay, retry);
+            wait = applyJitter(delay, maxDelay);
           }
           sleeper.sleep(wait);
-          delay = nextDelay(delay, retry);
+          delay = nextDelay(delay, maxDelay);
           continue;
         }
         if (status >= 500 || status == -1) {
@@ -448,8 +477,8 @@ public final class AnnounceBusImpl implements AnnounceBus, AutoCloseable {
           if (attempt >= attempts) {
             break;
           }
-          sleeper.sleep(applyJitter(delay, retry));
-          delay = nextDelay(delay, retry);
+          sleeper.sleep(applyJitter(delay, maxDelay));
+          delay = nextDelay(delay, maxDelay);
           continue;
         }
         if (status >= 400) {
@@ -464,24 +493,24 @@ public final class AnnounceBusImpl implements AnnounceBus, AutoCloseable {
       String message =
           String.format(
               "Retries exhausted after %d attempts (last=%s)",
-              retry.maxAttempts(),
+              transportConfig.maxAttempts(),
               lastCode != null ? lastCode : "unknown");
       return DeliveryResult.failure(new SendResult(false, "GIVE_UP", message, request.requestId.toString()));
     }
 
-    private Duration nextDelay(Duration current, Config.Retry retry) {
+    private Duration nextDelay(Duration current, Duration maxDelay) {
       long currentMs = Math.max(1, current.toMillis());
-      long doubled = Math.min(retry.maxDelay().toMillis(), currentMs * 2);
+      long doubled = Math.min(maxDelay.toMillis(), currentMs * 2);
       return Duration.ofMillis(doubled);
     }
 
-    private Duration applyJitter(Duration delay, Config.Retry retry) {
-      if (!retry.jitter()) {
+    private Duration applyJitter(Duration delay, Duration maxDelay) {
+      if (!DEFAULT_RETRY_JITTER) {
         return delay;
       }
       double factor = ThreadLocalRandom.current().nextDouble(0.5, 1.5);
       long millis = Math.max(1, Math.round(delay.toMillis() * factor));
-      long clamped = Math.min(retry.maxDelay().toMillis(), millis);
+      long clamped = Math.min(maxDelay.toMillis(), millis);
       return Duration.ofMillis(clamped);
     }
   }

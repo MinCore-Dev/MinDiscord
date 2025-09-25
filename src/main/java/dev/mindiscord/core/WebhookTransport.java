@@ -12,15 +12,26 @@ import java.time.temporal.TemporalAccessor;
 import java.util.Optional;
 
 public final class WebhookTransport implements WebhookClient {
-  private final HttpClient client =
-      HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
+  private volatile HttpClient client;
+  private volatile Duration requestTimeout;
+
+  public WebhookTransport() {
+    configure(Config.Transport.DEFAULTS);
+  }
+
+  @Override
+  public void configure(Config.Transport transport) {
+    Duration connect = Duration.ofMillis(transport.connectTimeoutMs());
+    this.client = HttpClient.newBuilder().connectTimeout(connect).build();
+    this.requestTimeout = Duration.ofMillis(transport.readTimeoutMs());
+  }
 
   @Override
   public TransportResponse postJson(String url, String json) {
     try {
       var req = HttpRequest.newBuilder(URI.create(url))
           .header("Content-Type", "application/json")
-          .timeout(Duration.ofSeconds(5))
+          .timeout(requestTimeout)
           .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
           .build();
       var resp = client.send(req, HttpResponse.BodyHandlers.discarding());

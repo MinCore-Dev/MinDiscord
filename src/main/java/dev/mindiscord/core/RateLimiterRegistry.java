@@ -6,29 +6,28 @@ import java.util.concurrent.ConcurrentHashMap;
 
 final class RateLimiterRegistry {
   private final Map<String, TokenBucket> buckets = new ConcurrentHashMap<>();
-  private volatile int burst = 10;
-  private volatile int refillPerSec = 5;
+  private volatile Config.RateLimit rateLimit = Config.RateLimit.DEFAULTS;
 
-  void configure(int burst, int refillPerSec) {
-    this.burst = burst;
-    this.refillPerSec = refillPerSec;
-    buckets.values().forEach(bucket -> bucket.configure(burst, refillPerSec));
+  void configure(Config.RateLimit rateLimit) {
+    this.rateLimit = rateLimit;
+    buckets.forEach((route, bucket) -> bucket.configure(rateLimit.ruleFor(route)));
   }
 
   Duration acquire(String key, TimeSource timeSource) {
-    TokenBucket bucket = buckets.computeIfAbsent(key, k -> new TokenBucket(burst, refillPerSec, timeSource));
+    Config.RateLimit.Rule rule = rateLimit.ruleFor(key);
+    TokenBucket bucket = buckets.computeIfAbsent(key, k -> new TokenBucket(rule, timeSource));
+    bucket.configure(rule);
     return bucket.acquire(timeSource);
   }
 
   private static final class TokenBucket {
-    private volatile int capacity;
-    private volatile int refillPerSec;
+    private double capacity;
+    private double refillPerSecond;
     private double tokens;
     private long lastCheck;
 
-    TokenBucket(int capacity, int refillPerSec, TimeSource timeSource) {
-      this.capacity = capacity;
-      this.refillPerSec = refillPerSec;
+    TokenBucket(Config.RateLimit.Rule rule, TimeSource timeSource) {
+      configure(rule);
       this.tokens = capacity;
       this.lastCheck = timeSource.nanoTime();
     }
@@ -36,20 +35,20 @@ final class RateLimiterRegistry {
     synchronized Duration acquire(TimeSource timeSource) {
       long now = timeSource.nanoTime();
       refill(now);
-      if (tokens >= 1.0) {
-        tokens -= 1.0;
+      if (tokens >= 1.0d) {
+        tokens -= 1.0d;
         return Duration.ZERO;
       }
-      double needed = 1.0 - tokens;
-      double seconds = needed / Math.max(1, refillPerSec);
+      double needed = 1.0d - tokens;
+      double seconds = needed / Math.max(0.0001d, refillPerSecond);
       long nanos = (long) Math.ceil(seconds * 1_000_000_000L);
-      tokens = Math.max(-capacity, tokens - 1.0);
-      return Duration.ofNanos(Math.max(0, nanos));
+      tokens = Math.max(-capacity, tokens - 1.0d);
+      return Duration.ofNanos(Math.max(0L, nanos));
     }
 
-    synchronized void configure(int capacity, int refillPerSec) {
-      this.capacity = capacity;
-      this.refillPerSec = refillPerSec;
+    synchronized void configure(Config.RateLimit.Rule rule) {
+      this.capacity = rule.burst();
+      this.refillPerSecond = rule.refillTokensPerSecond();
       if (tokens > capacity) {
         tokens = capacity;
       }
@@ -59,12 +58,12 @@ final class RateLimiterRegistry {
     }
 
     private void refill(long now) {
-      long elapsed = Math.max(0, now - lastCheck);
-      if (elapsed <= 0) {
+      long elapsed = Math.max(0L, now - lastCheck);
+      if (elapsed <= 0L) {
         return;
       }
       double seconds = elapsed / 1_000_000_000d;
-      tokens = Math.min(capacity, tokens + seconds * refillPerSec);
+      tokens = Math.min(capacity, tokens + seconds * refillPerSecond);
       lastCheck = now;
     }
   }

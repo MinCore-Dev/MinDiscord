@@ -52,6 +52,10 @@ public final class MinDiscordRuntime implements AutoCloseable {
 
   public MinCoreBridge bridge() { return bridge; }
 
+  public Config config() {
+    return configLoader.current();
+  }
+
   @Override
   public void close() {
     bus.close();

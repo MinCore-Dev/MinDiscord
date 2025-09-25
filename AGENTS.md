@@ -98,6 +98,45 @@ All JDBC work occurs off the main thread.
 
 ---
 
+## Permission Gateway (LuckPerms-first)
+
+- Always prefer MinCore's gateway (`dev.mincore.perms.Perms.check(player, node, level)`) when
+  available on the classpath.
+- If MinCore's permission gateway is absent or invocation fails, fall back to the local
+  `dev.mindiscord.perms.Perms` helper which checks LuckPerms first, then Fabric Permissions API,
+  and finally the vanilla OP level.
+- LuckPerms and Fabric Permissions must be `compileOnly`; surface them via
+  `fabric.mod.json` `suggests` entries instead of hard dependencies.
+- All commands and administrative entry points must route through this gateway rather than calling
+  `hasPermissionLevel` directly.
+
+---
+
+## Configuration & Hot Reload
+
+- Runtime configuration lives in `config/mindiscord.json5` (JSON5). An `.example` file is generated on
+  first startup using the advisory lock `mindiscord:init` for idempotence.
+- Schema overview:
+  - `core`: `{ enabled, redactUrlsInCommands, hotReload }`
+  - `routes`: logical route names mapped to webhook URLs or `env:VAR` targets
+  - `announce`: `{ enabled, allowFallbackToDefault, allowedRoutes[] }`
+  - `rateLimit`: `{ perRoute { name: { tokensPerMinute, burst } }, overflowPolicy }`
+  - `queue`: `{ capacity, workerThreads }` (overflow policy derived from `rateLimit`)
+  - `transport`: `{ connectTimeoutMs, readTimeoutMs, maxAttempts }`
+  - `commands`: `{ routes|test|diag: { enabled } }`
+  - `permissions`: `{ admin }`
+- Toggles:
+  - `core.enabled=false` short-circuits commands and sends with a `DISABLED` result.
+  - `announce.enabled=false` blocks announcement sends and command usage.
+  - `announce.allowedRoutes` whitelists route names; disallowed names return `ROUTE_DISABLED`.
+  - Unknown but allowed routes fall back to `default` (returning `BAD_ROUTE_FALLBACK`) only when
+    `allowFallbackToDefault=true`; otherwise they return `BAD_ROUTE`.
+  - `core.redactUrlsInCommands` controls whether `/mindiscord routes` prints redacted webhook URLs.
+- Hot reload watches `mindiscord.json5` and atomically swaps the in-memory config. If both the
+  previous and new configs have `core.hotReload=false`, the change is logged but deferred until restart.
+
+---
+
 ## 3) Public API (what other plugins call)
 
 **Discovery**

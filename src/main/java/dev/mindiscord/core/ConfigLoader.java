@@ -151,7 +151,12 @@ public final class ConfigLoader implements AutoCloseable {
 
   private void reload() {
     Config cfg = loadConfig();
-    if (cfg == current) {
+    Config previous = current;
+    if (cfg == previous) {
+      return;
+    }
+    if (previous != null && !previous.core().hotReload() && !cfg.core().hotReload()) {
+      LOGGER.info("mindiscord.json5 updated but hotReload=false; change will apply on restart");
       return;
     }
     current = cfg;
@@ -162,25 +167,46 @@ public final class ConfigLoader implements AutoCloseable {
         LOGGER.error("Config listener threw: {}", e.toString());
       }
     }
-    LOGGER.info("Reloaded mindiscord.json5 ({} routes)", cfg.routes().size());
+    LOGGER.info(
+        "Reloaded mindiscord.json5 (routes={}, core.enabled={}, hotReload={})",
+        cfg.routes().size(),
+        cfg.core().enabled(),
+        cfg.core().hotReload());
   }
 
   private static String exampleContents() {
     return """
         {
-          mode: "webhook",
-          routes: {
-            default:            "https://discord.com/api/webhooks/GGGG/HHH",
-            eventAnnouncements: "env:MINDISCORD_WEBHOOK_ANNOUNCE",
-            eventStarts:        "https://discord.com/api/webhooks/AAAA/BBB",
-            eventWinners:       "https://discord.com/api/webhooks/CCCC/DDD",
-            rareDrops:          "https://discord.com/api/webhooks/EEEE/FFF"
+          core: {
+            enabled: true,
+            redactUrlsInCommands: true,
+            hotReload: true
           },
-          defaults: { username: "MinDiscord", avatarUrl: "" },
-          queue: { maxSize: 2000, onOverflow: "dropOldest" },
-          retry: { maxAttempts: 6, baseDelayMs: 500, maxDelayMs: 15000, jitter: true },
-          ratelimit: { perRouteBurst: 10, perRouteRefillPerSec: 5 },
-          log: { level: "INFO", json: false }
+          routes: {
+            default: "env:DISCORD_WEBHOOK_DEFAULT",
+            eventAnnouncements: "env:DISCORD_WEBHOOK_EVENTS",
+            rareDrops: "https://discord.com/api/webhooks/RARE/DROPS"
+          },
+          announce: {
+            enabled: true,
+            allowFallbackToDefault: true,
+            allowedRoutes: ["default", "eventAnnouncements", "rareDrops"]
+          },
+          rateLimit: {
+            perRoute: {
+              default: { tokensPerMinute: 20, burst: 10 },
+              rareDrops: { tokensPerMinute: 6, burst: 3 }
+            },
+            overflowPolicy: "dropOldest"
+          },
+          queue: { capacity: 512, workerThreads: 1 },
+          transport: { connectTimeoutMs: 3000, readTimeoutMs: 5000, maxAttempts: 4 },
+          commands: {
+            routes: { enabled: true },
+            test: { enabled: true },
+            diag: { enabled: true }
+          },
+          permissions: { admin: "mindiscord.admin" }
         }
         """;
   }

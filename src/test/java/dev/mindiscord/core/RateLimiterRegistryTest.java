@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class RateLimiterRegistryTest {
@@ -12,7 +13,10 @@ class RateLimiterRegistryTest {
   void refillsTokensAfterReportedDelay() {
     RateLimiterRegistry registry = new RateLimiterRegistry();
     FakeTimeSource time = new FakeTimeSource();
-    registry.configure(2, 2);
+    registry.configure(
+        new Config.RateLimit(
+            Map.of("default", new Config.RateLimit.Rule(120, 2)),
+            Config.QueueOverflowPolicy.DROP_OLDEST));
 
     Duration[] waits = new Duration[4];
     for (int i = 0; i < waits.length; i++) {

@@ -1,6 +1,7 @@
 package dev.mindiscord.commands;
 
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import dev.mindiscord.core.Config;
 import dev.mindiscord.core.MinDiscordRuntime;
 import dev.mindiscord.core.Router;
 import net.minecraft.server.command.CommandManager;
@@ -19,6 +20,15 @@ public final class MindiscordRoutesCommand {
     if (!CommandRegistrar.tryConsumeCooldown(source)) {
       return 0;
     }
+    Config cfg = runtime.config();
+    if (!cfg.core().enabled()) {
+      source.sendError(Text.literal("MinDiscord disabled via config"));
+      return 0;
+    }
+    if (!cfg.commands().routesEnabled()) {
+      source.sendError(Text.literal("Routes command disabled via config"));
+      return 0;
+    }
     var routes = runtime.routes();
     source.sendFeedback(
         () -> Text.literal("MinDiscord routes (" + routes.size() + ")"),
@@ -26,14 +36,9 @@ public final class MindiscordRoutesCommand {
     if (routes.isEmpty()) {
       source.sendFeedback(() -> Text.literal("  (no routes configured)"), false);
     } else {
+      boolean redact = cfg.core().redactUrlsInCommands();
       for (Router.RouteInfo info : routes) {
-        String value;
-        if (info.environment()) {
-          value =
-              "env:" + info.envVariable() + (info.available() ? " (set)" : " (missing)");
-        } else {
-          value = redact(info.rawTarget());
-        }
+        String value = formatRoute(info, redact);
         source.sendFeedback(
             () -> Text.literal("  - " + info.name() + ": " + value), false);
       }
@@ -42,7 +47,14 @@ public final class MindiscordRoutesCommand {
     return routes.size();
   }
 
-  private static String redact(String url) {
+  static String formatRoute(Router.RouteInfo info, boolean redact) {
+    if (info.environment()) {
+      return "env:" + info.envVariable() + (info.available() ? " (set)" : " (missing)");
+    }
+    String url = info.rawTarget();
+    if (!redact) {
+      return url != null && !url.isBlank() ? url : "unset";
+    }
     if (url == null || url.isBlank()) {
       return "unset";
     }

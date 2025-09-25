@@ -1,69 +1,107 @@
 package dev.mindiscord.core;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /** Immutable runtime configuration for MinDiscord. */
 public final class Config {
-  private final String mode;
+  private final Core core;
   private final Map<String, RouteDefinition> routes;
   private final Defaults defaults;
+  private final Announce announce;
   private final Queue queue;
-  private final Retry retry;
-  private final RateLimit ratelimit;
-  private final Log log;
+  private final Transport transport;
+  private final RateLimit rateLimit;
+  private final Commands commands;
+  private final Permissions permissions;
 
   private Config(
-      String mode,
+      Core core,
       Map<String, RouteDefinition> routes,
       Defaults defaults,
+      Announce announce,
       Queue queue,
-      Retry retry,
-      RateLimit ratelimit,
-      Log log) {
-    this.mode = mode;
+      Transport transport,
+      RateLimit rateLimit,
+      Commands commands,
+      Permissions permissions) {
+    this.core = core;
     this.routes = routes;
     this.defaults = defaults;
+    this.announce = announce;
     this.queue = queue;
-    this.retry = retry;
-    this.ratelimit = ratelimit;
-    this.log = log;
+    this.transport = transport;
+    this.rateLimit = rateLimit;
+    this.commands = commands;
+    this.permissions = permissions;
   }
 
-  public String mode() { return mode; }
+  public Core core() {
+    return core;
+  }
 
-  public Map<String, RouteDefinition> routes() { return routes; }
+  public Map<String, RouteDefinition> routes() {
+    return routes;
+  }
 
-  public Defaults defaults() { return defaults; }
+  public Defaults defaults() {
+    return defaults;
+  }
 
-  public Queue queue() { return queue; }
+  public Announce announce() {
+    return announce;
+  }
 
-  public Retry retry() { return retry; }
+  public Queue queue() {
+    return queue;
+  }
 
-  public RateLimit ratelimit() { return ratelimit; }
+  public Transport transport() {
+    return transport;
+  }
 
-  public Log log() { return log; }
+  public RateLimit rateLimit() {
+    return rateLimit;
+  }
 
-  public static Builder builder() { return new Builder(); }
+  public Commands commands() {
+    return commands;
+  }
 
-  public static Config defaultConfig() { return builder().build(); }
+  public Permissions permissions() {
+    return permissions;
+  }
+
+  public List<RouteDefinition> orderedRoutes() {
+    return new ArrayList<>(routes.values());
+  }
+
+  public static Builder builder() {
+    return new Builder();
+  }
+
+  public static Config defaultConfig() {
+    return builder().build();
+  }
 
   public static final class Builder {
-    private String mode = "webhook";
+    private Core core = Core.DEFAULTS;
     private final Map<String, RouteDefinition> routes = new LinkedHashMap<>();
     private Defaults defaults = Defaults.DEFAULTS;
+    private Announce announce = Announce.DEFAULTS;
     private Queue queue = Queue.DEFAULTS;
-    private Retry retry = Retry.DEFAULTS;
-    private RateLimit ratelimit = RateLimit.DEFAULTS;
-    private Log log = Log.DEFAULTS;
+    private Transport transport = Transport.DEFAULTS;
+    private RateLimit rateLimit = RateLimit.DEFAULTS;
+    private Commands commands = Commands.DEFAULTS;
+    private Permissions permissions = Permissions.DEFAULTS;
 
-    public Builder mode(String mode) {
-      this.mode = Objects.requireNonNull(mode, "mode");
+    public Builder core(Core core) {
+      this.core = Objects.requireNonNull(core, "core");
       return this;
     }
 
@@ -72,9 +110,9 @@ public final class Config {
       return this;
     }
 
-    public Builder routes(Map<String, String> map) {
+    public Builder routes(Map<String, String> definitions) {
       routes.clear();
-      map.forEach(this::putRoute);
+      definitions.forEach(this::putRoute);
       return this;
     }
 
@@ -83,39 +121,73 @@ public final class Config {
       return this;
     }
 
+    public Builder announce(Announce announce) {
+      this.announce = Objects.requireNonNull(announce, "announce");
+      return this;
+    }
+
     public Builder queue(Queue queue) {
       this.queue = Objects.requireNonNull(queue, "queue");
       return this;
     }
 
-    public Builder retry(Retry retry) {
-      this.retry = Objects.requireNonNull(retry, "retry");
+    public Builder transport(Transport transport) {
+      this.transport = Objects.requireNonNull(transport, "transport");
       return this;
     }
 
-    public Builder ratelimit(RateLimit ratelimit) {
-      this.ratelimit = Objects.requireNonNull(ratelimit, "ratelimit");
+    public Builder rateLimit(RateLimit rateLimit) {
+      this.rateLimit = Objects.requireNonNull(rateLimit, "rateLimit");
       return this;
     }
 
-    public Builder log(Log log) {
-      this.log = Objects.requireNonNull(log, "log");
+    public Builder commands(Commands commands) {
+      this.commands = Objects.requireNonNull(commands, "commands");
+      return this;
+    }
+
+    public Builder permissions(Permissions permissions) {
+      this.permissions = Objects.requireNonNull(permissions, "permissions");
       return this;
     }
 
     public Config build() {
-      String normalizedMode = Objects.requireNonNullElse(mode, "webhook");
-      if (!"webhook".equalsIgnoreCase(normalizedMode)) {
-        throw new IllegalArgumentException("Only webhook mode is supported");
-      }
+      Map<String, RouteDefinition> copy = Map.copyOf(routes);
       return new Config(
-          normalizedMode.toLowerCase(Locale.ROOT),
-          Map.copyOf(routes),
+          core,
+          copy,
           defaults,
+          announce.ensureDefaultsPresent(copy.keySet()),
           queue,
-          retry,
-          ratelimit,
-          log);
+          transport,
+          rateLimit.ensureDefaultsPresent(copy.keySet()),
+          commands,
+          permissions);
+    }
+  }
+
+  public static final class Core {
+    static final Core DEFAULTS = new Core(true, true, true);
+    private final boolean enabled;
+    private final boolean redactUrlsInCommands;
+    private final boolean hotReload;
+
+    public Core(boolean enabled, boolean redactUrlsInCommands, boolean hotReload) {
+      this.enabled = enabled;
+      this.redactUrlsInCommands = redactUrlsInCommands;
+      this.hotReload = hotReload;
+    }
+
+    public boolean enabled() {
+      return enabled;
+    }
+
+    public boolean redactUrlsInCommands() {
+      return redactUrlsInCommands;
+    }
+
+    public boolean hotReload() {
+      return hotReload;
     }
   }
 
@@ -132,13 +204,21 @@ public final class Config {
       this.envVariable = envVariable;
     }
 
-    public String name() { return name; }
+    public String name() {
+      return name;
+    }
 
-    public String rawTarget() { return rawTarget; }
+    public String rawTarget() {
+      return rawTarget;
+    }
 
-    public boolean environment() { return environment; }
+    public boolean environment() {
+      return environment;
+    }
 
-    public String envVariable() { return envVariable; }
+    public String envVariable() {
+      return envVariable;
+    }
 
     public static RouteDefinition of(String name, String target) {
       Objects.requireNonNull(name, "name");
@@ -168,9 +248,66 @@ public final class Config {
       this.avatarUrl = Objects.requireNonNullElse(avatarUrl, "");
     }
 
-    public String username() { return username; }
+    public String username() {
+      return username;
+    }
 
-    public String avatarUrl() { return avatarUrl; }
+    public String avatarUrl() {
+      return avatarUrl;
+    }
+  }
+
+  public static final class Announce {
+    static final Announce DEFAULTS = new Announce(true, true, List.of("default"));
+    private final boolean enabled;
+    private final boolean allowFallbackToDefault;
+    private final List<String> allowedRoutes;
+
+    public Announce(boolean enabled, boolean allowFallbackToDefault, List<String> allowedRoutes) {
+      this.enabled = enabled;
+      this.allowFallbackToDefault = allowFallbackToDefault;
+      this.allowedRoutes = List.copyOf(Objects.requireNonNullElseGet(allowedRoutes, List::of));
+    }
+
+    private Announce ensureDefaultsPresent(Set<String> routes) {
+      List<String> normalized = new ArrayList<>();
+      for (String entry : allowedRoutes) {
+        if (entry == null) {
+          continue;
+        }
+        String trimmed = entry.trim();
+        if (!trimmed.isEmpty()) {
+          normalized.add(trimmed);
+        }
+      }
+      if (normalized.isEmpty()) {
+        normalized.add("default");
+      }
+      if (!normalized.contains("default") && routes.contains("default")) {
+        normalized.add("default");
+      }
+      return new Announce(enabled, allowFallbackToDefault, List.copyOf(normalized));
+    }
+
+    public boolean enabled() {
+      return enabled;
+    }
+
+    public boolean allowFallbackToDefault() {
+      return allowFallbackToDefault;
+    }
+
+    public List<String> allowedRoutes() {
+      return allowedRoutes;
+    }
+
+    public boolean isRouteAllowed(String route) {
+      if (allowedRoutes.isEmpty()) {
+        return true;
+      }
+      String normalized = route == null || route.isBlank() ? "default" : route;
+      return allowedRoutes.contains(normalized);
+    }
   }
 
   public enum QueueOverflowPolicy {
@@ -179,7 +316,7 @@ public final class Config {
     REJECT;
 
     static QueueOverflowPolicy from(String raw) {
-      if (raw == null) {
+      if (raw == null || raw.isBlank()) {
         return DROP_OLDEST;
       }
       return switch (raw.toLowerCase(Locale.ROOT)) {
@@ -192,84 +329,168 @@ public final class Config {
   }
 
   public static final class Queue {
-    static final Queue DEFAULTS = new Queue(2000, QueueOverflowPolicy.DROP_OLDEST);
-    private final int maxSize;
-    private final QueueOverflowPolicy onOverflow;
+    static final Queue DEFAULTS = new Queue(512, 1, QueueOverflowPolicy.DROP_OLDEST);
+    private final int capacity;
+    private final int workerThreads;
+    private final QueueOverflowPolicy overflowPolicy;
 
-    public Queue(int maxSize, QueueOverflowPolicy onOverflow) {
-      if (maxSize <= 0) {
-        throw new IllegalArgumentException("queue.maxSize must be > 0");
+    public Queue(int capacity, int workerThreads, QueueOverflowPolicy overflowPolicy) {
+      if (capacity <= 0) {
+        throw new IllegalArgumentException("queue.capacity must be > 0");
       }
-      this.maxSize = maxSize;
-      this.onOverflow = Objects.requireNonNull(onOverflow, "onOverflow");
+      if (workerThreads <= 0) {
+        throw new IllegalArgumentException("queue.workerThreads must be > 0");
+      }
+      this.capacity = capacity;
+      this.workerThreads = workerThreads;
+      this.overflowPolicy = Objects.requireNonNull(overflowPolicy, "overflowPolicy");
     }
 
-    public int maxSize() { return maxSize; }
+    public int capacity() {
+      return capacity;
+    }
 
-    public QueueOverflowPolicy onOverflow() { return onOverflow; }
+    public int workerThreads() {
+      return workerThreads;
+    }
+
+    public QueueOverflowPolicy overflowPolicy() {
+      return overflowPolicy;
+    }
+
+    public Queue withOverflowPolicy(QueueOverflowPolicy policy) {
+      return new Queue(capacity, workerThreads, policy);
+    }
   }
 
-  public static final class Retry {
-    static final Retry DEFAULTS =
-        new Retry(6, Duration.ofMillis(500), Duration.ofMillis(15_000), true);
+  public static final class Transport {
+    static final Transport DEFAULTS = new Transport(3000, 5000, 4);
+    private final int connectTimeoutMs;
+    private final int readTimeoutMs;
     private final int maxAttempts;
-    private final Duration baseDelay;
-    private final Duration maxDelay;
-    private final boolean jitter;
 
-    public Retry(int maxAttempts, Duration baseDelay, Duration maxDelay, boolean jitter) {
-      if (maxAttempts <= 0) {
-        throw new IllegalArgumentException("retry.maxAttempts must be > 0");
+    public Transport(int connectTimeoutMs, int readTimeoutMs, int maxAttempts) {
+      if (connectTimeoutMs <= 0) {
+        throw new IllegalArgumentException("transport.connectTimeoutMs must be > 0");
       }
+      if (readTimeoutMs <= 0) {
+        throw new IllegalArgumentException("transport.readTimeoutMs must be > 0");
+      }
+      if (maxAttempts <= 0) {
+        throw new IllegalArgumentException("transport.maxAttempts must be > 0");
+      }
+      this.connectTimeoutMs = connectTimeoutMs;
+      this.readTimeoutMs = readTimeoutMs;
       this.maxAttempts = maxAttempts;
-      this.baseDelay = Objects.requireNonNull(baseDelay, "baseDelay");
-      this.maxDelay = Objects.requireNonNull(maxDelay, "maxDelay");
-      this.jitter = jitter;
     }
 
-    public int maxAttempts() { return maxAttempts; }
+    public int connectTimeoutMs() {
+      return connectTimeoutMs;
+    }
 
-    public Duration baseDelay() { return baseDelay; }
+    public int readTimeoutMs() {
+      return readTimeoutMs;
+    }
 
-    public Duration maxDelay() { return maxDelay; }
-
-    public boolean jitter() { return jitter; }
+    public int maxAttempts() {
+      return maxAttempts;
+    }
   }
 
   public static final class RateLimit {
-    static final RateLimit DEFAULTS = new RateLimit(10, 5);
-    private final int perRouteBurst;
-    private final int perRouteRefillPerSec;
+    static final RateLimit DEFAULTS =
+        new RateLimit(Map.of("default", Rule.DEFAULT), QueueOverflowPolicy.DROP_OLDEST);
+    private final Map<String, Rule> perRoute;
+    private final QueueOverflowPolicy overflowPolicy;
 
-    public RateLimit(int perRouteBurst, int perRouteRefillPerSec) {
-      if (perRouteBurst <= 0) {
-        throw new IllegalArgumentException("ratelimit.perRouteBurst must be > 0");
+    public RateLimit(Map<String, Rule> perRoute, QueueOverflowPolicy overflowPolicy) {
+      if (perRoute == null || perRoute.isEmpty()) {
+        throw new IllegalArgumentException("rateLimit.perRoute must contain at least one route");
       }
-      if (perRouteRefillPerSec <= 0) {
-        throw new IllegalArgumentException("ratelimit.perRouteRefillPerSec must be > 0");
-      }
-      this.perRouteBurst = perRouteBurst;
-      this.perRouteRefillPerSec = perRouteRefillPerSec;
+      this.perRoute = Map.copyOf(perRoute);
+      this.overflowPolicy = Objects.requireNonNull(overflowPolicy, "overflowPolicy");
     }
 
-    public int perRouteBurst() { return perRouteBurst; }
+    private RateLimit ensureDefaultsPresent(Set<String> routes) {
+      Map<String, Rule> copy = new LinkedHashMap<>(perRoute);
+      copy.putIfAbsent("default", Rule.DEFAULT);
+      for (String route : routes) {
+        copy.putIfAbsent(route, Rule.DEFAULT);
+      }
+      return new RateLimit(copy, overflowPolicy);
+    }
 
-    public int perRouteRefillPerSec() { return perRouteRefillPerSec; }
+    public Map<String, Rule> perRoute() {
+      return perRoute;
+    }
+
+    public QueueOverflowPolicy overflowPolicy() {
+      return overflowPolicy;
+    }
+
+    public Rule ruleFor(String route) {
+      String normalized = route == null || route.isBlank() ? "default" : route;
+      Rule rule = perRoute.get(normalized);
+      if (rule == null) {
+        rule = perRoute.get("default");
+      }
+      return rule != null ? rule : Rule.DEFAULT;
+    }
+
+    public record Rule(int tokensPerMinute, int burst) {
+      static final Rule DEFAULT = new Rule(20, 10);
+
+      public Rule {
+        if (tokensPerMinute <= 0) {
+          throw new IllegalArgumentException("tokensPerMinute must be > 0");
+        }
+        if (burst <= 0) {
+          throw new IllegalArgumentException("burst must be > 0");
+        }
+      }
+
+      public double refillTokensPerSecond() {
+        return tokensPerMinute / 60.0;
+      }
+    }
   }
 
-  public static final class Log {
-    static final Log DEFAULTS = new Log("INFO", false);
-    private final String level;
-    private final boolean json;
+  public static final class Commands {
+    static final Commands DEFAULTS = new Commands(true, true, true);
+    private final boolean routesEnabled;
+    private final boolean testEnabled;
+    private final boolean diagEnabled;
 
-    public Log(String level, boolean json) {
-      this.level = Objects.requireNonNullElse(level, "INFO");
-      this.json = json;
+    public Commands(boolean routesEnabled, boolean testEnabled, boolean diagEnabled) {
+      this.routesEnabled = routesEnabled;
+      this.testEnabled = testEnabled;
+      this.diagEnabled = diagEnabled;
     }
 
-    public String level() { return level; }
+    public boolean routesEnabled() {
+      return routesEnabled;
+    }
 
-    public boolean json() { return json; }
+    public boolean testEnabled() {
+      return testEnabled;
+    }
+
+    public boolean diagEnabled() {
+      return diagEnabled;
+    }
+  }
+
+  public static final class Permissions {
+    static final Permissions DEFAULTS = new Permissions("mindiscord.admin");
+    private final String admin;
+
+    public Permissions(String admin) {
+      this.admin = admin == null || admin.isBlank() ? "mindiscord.admin" : admin;
+    }
+
+    public String admin() {
+      return admin;
+    }
   }
 
   public static Config fromRaw(Raw raw) {
@@ -277,98 +498,174 @@ public final class Config {
       return defaultConfig();
     }
     Builder builder = builder();
-    if (raw.mode != null) {
-      builder.mode(raw.mode);
-    }
-    if (raw.routes != null) {
-      for (Map.Entry<String, String> entry : raw.routes.entrySet()) {
-        builder.putRoute(entry.getKey(), entry.getValue());
-      }
-    }
+    builder.core(raw.core != null ? raw.core.toCore() : Core.DEFAULTS);
     builder.defaults(raw.defaults != null ? raw.defaults.toDefaults() : Defaults.DEFAULTS);
-    builder.queue(raw.queue != null ? raw.queue.toQueue() : Queue.DEFAULTS);
-    builder.retry(raw.retry != null ? raw.retry.toRetry() : Retry.DEFAULTS);
-    builder.ratelimit(raw.ratelimit != null ? raw.ratelimit.toRateLimit() : RateLimit.DEFAULTS);
-    builder.log(raw.log != null ? raw.log.toLog() : Log.DEFAULTS);
+    Announce announce = raw.announce != null ? raw.announce.toAnnounce() : Announce.DEFAULTS;
+    if (raw.routes != null) {
+      raw.routes.forEach(builder::putRoute);
+    }
+    builder.announce(announce);
+    Queue queue = raw.queue != null ? raw.queue.toQueue() : Queue.DEFAULTS;
+    RateLimit rateLimit = raw.rateLimit != null ? raw.rateLimit.toRateLimit() : RateLimit.DEFAULTS;
+    QueueOverflowPolicy overflowPolicy = rateLimit.overflowPolicy();
+    if (raw.rateLimit != null && raw.rateLimit.overflowPolicy != null) {
+      overflowPolicy = QueueOverflowPolicy.from(raw.rateLimit.overflowPolicy);
+    } else if (raw.queue != null && raw.queue.overflowPolicy != null) {
+      overflowPolicy = QueueOverflowPolicy.from(raw.queue.overflowPolicy);
+    }
+    builder.queue(queue.withOverflowPolicy(overflowPolicy));
+    builder.rateLimit(rateLimit);
+    builder.transport(raw.transport != null ? raw.transport.toTransport() : Transport.DEFAULTS);
+    builder.commands(raw.commands != null ? raw.commands.toCommands() : Commands.DEFAULTS);
+    builder.permissions(raw.permissions != null ? raw.permissions.toPermissions() : Permissions.DEFAULTS);
     return builder.build();
   }
 
   public static final class Raw {
-    public String mode;
+    public RawCore core;
     public Map<String, String> routes;
     public RawDefaults defaults;
+    public RawAnnounce announce;
     public RawQueue queue;
-    public RawRetry retry;
-    public RawRateLimit ratelimit;
-    public RawLog log;
+    public RawTransport transport;
+    public RawRateLimit rateLimit;
+    public RawCommands commands;
+    public RawPermissions permissions;
+  }
+
+  public static final class RawCore {
+    public Boolean enabled;
+    public Boolean redactUrlsInCommands;
+    public Boolean hotReload;
+
+    Core toCore() {
+      boolean enabledValue = enabled != null ? enabled : Core.DEFAULTS.enabled();
+      boolean redact =
+          redactUrlsInCommands != null ? redactUrlsInCommands : Core.DEFAULTS.redactUrlsInCommands();
+      boolean hotReloadValue = hotReload != null ? hotReload : Core.DEFAULTS.hotReload();
+      return new Core(enabledValue, redact, hotReloadValue);
+    }
   }
 
   public static final class RawDefaults {
     public String username;
     public String avatarUrl;
 
-    Defaults toDefaults() { return new Defaults(username, avatarUrl); }
-  }
-
-  public static final class RawQueue {
-    public Integer maxSize;
-    public String onOverflow;
-
-    Queue toQueue() {
-      int size = maxSize != null ? maxSize : Queue.DEFAULTS.maxSize();
-      QueueOverflowPolicy policy = QueueOverflowPolicy.from(onOverflow);
-      return new Queue(size, policy);
+    Defaults toDefaults() {
+      return new Defaults(username, avatarUrl);
     }
   }
 
-  public static final class RawRetry {
-    public Integer maxAttempts;
-    public Integer baseDelayMs;
-    public Integer maxDelayMs;
-    public Boolean jitter;
+  public static final class RawAnnounce {
+    public Boolean enabled;
+    public Boolean allowFallbackToDefault;
+    public List<String> allowedRoutes;
 
-    Retry toRetry() {
-      int attempts = maxAttempts != null ? maxAttempts : Retry.DEFAULTS.maxAttempts();
-      Duration base =
-          Duration.ofMillis(baseDelayMs != null ? baseDelayMs : Retry.DEFAULTS.baseDelay().toMillis());
-      Duration max =
-          Duration.ofMillis(maxDelayMs != null ? maxDelayMs : Retry.DEFAULTS.maxDelay().toMillis());
-      boolean useJitter = jitter != null ? jitter : Retry.DEFAULTS.jitter();
-      if (base.isZero() || base.isNegative()) {
-        throw new IllegalArgumentException("retry.baseDelayMs must be > 0");
-      }
-      if (max.compareTo(base) < 0) {
-        throw new IllegalArgumentException("retry.maxDelayMs must be >= baseDelayMs");
-      }
-      return new Retry(attempts, base, max, useJitter);
+    Announce toAnnounce() {
+      boolean enabledValue = enabled != null ? enabled : Announce.DEFAULTS.enabled();
+      boolean fallback =
+          allowFallbackToDefault != null
+              ? allowFallbackToDefault
+              : Announce.DEFAULTS.allowFallbackToDefault();
+      List<String> routesList = allowedRoutes != null ? allowedRoutes : Announce.DEFAULTS.allowedRoutes();
+      return new Announce(enabledValue, fallback, routesList);
+    }
+  }
+
+  public static final class RawQueue {
+    public Integer capacity;
+    public Integer workerThreads;
+    public String overflowPolicy;
+
+    Queue toQueue() {
+      int cap = capacity != null ? capacity : Queue.DEFAULTS.capacity();
+      int workers = workerThreads != null ? workerThreads : Queue.DEFAULTS.workerThreads();
+      QueueOverflowPolicy policy =
+          overflowPolicy != null
+              ? QueueOverflowPolicy.from(overflowPolicy)
+              : Queue.DEFAULTS.overflowPolicy();
+      return new Queue(cap, workers, policy);
+    }
+  }
+
+  public static final class RawTransport {
+    public Integer connectTimeoutMs;
+    public Integer readTimeoutMs;
+    public Integer maxAttempts;
+
+    Transport toTransport() {
+      int connect =
+          connectTimeoutMs != null ? connectTimeoutMs : Transport.DEFAULTS.connectTimeoutMs();
+      int read = readTimeoutMs != null ? readTimeoutMs : Transport.DEFAULTS.readTimeoutMs();
+      int attempts = maxAttempts != null ? maxAttempts : Transport.DEFAULTS.maxAttempts();
+      return new Transport(connect, read, attempts);
     }
   }
 
   public static final class RawRateLimit {
-    public Integer perRouteBurst;
-    public Integer perRouteRefillPerSec;
+    public Map<String, RawRateLimitRule> perRoute;
+    public String overflowPolicy;
 
     RateLimit toRateLimit() {
-      int burst =
-          perRouteBurst != null ? perRouteBurst : RateLimit.DEFAULTS.perRouteBurst();
-      int refill =
-          perRouteRefillPerSec != null
-              ? perRouteRefillPerSec
-              : RateLimit.DEFAULTS.perRouteRefillPerSec();
-      return new RateLimit(burst, refill);
+      Map<String, RateLimit.Rule> map = new LinkedHashMap<>();
+      if (perRoute != null) {
+        for (Map.Entry<String, RawRateLimitRule> entry : perRoute.entrySet()) {
+          map.put(entry.getKey(), entry.getValue().toRule(entry.getKey()));
+        }
+      }
+      if (!map.containsKey("default")) {
+        map.put("default", RateLimit.Rule.DEFAULT);
+      }
+      QueueOverflowPolicy policy =
+          overflowPolicy != null
+              ? QueueOverflowPolicy.from(overflowPolicy)
+              : RateLimit.DEFAULTS.overflowPolicy();
+      return new RateLimit(map, policy);
     }
   }
 
-  public static final class RawLog {
-    public String level;
-    public Boolean json;
+  public static final class RawRateLimitRule {
+    public Integer tokensPerMinute;
+    public Integer burst;
 
-    Log toLog() {
-      return new Log(level, json != null ? json : Log.DEFAULTS.json());
+    RateLimit.Rule toRule(String name) {
+      int tokens =
+          tokensPerMinute != null ? tokensPerMinute : RateLimit.Rule.DEFAULT.tokensPerMinute();
+      int burstValue = burst != null ? burst : RateLimit.Rule.DEFAULT.burst();
+      try {
+        return new RateLimit.Rule(tokens, burstValue);
+      } catch (IllegalArgumentException e) {
+        throw new IllegalArgumentException("Invalid rate limit for route " + name + ": " + e.getMessage(), e);
+      }
     }
   }
 
-  public List<RouteDefinition> orderedRoutes() {
-    return new ArrayList<>(routes.values());
+  public static final class RawCommands {
+    public RawToggle routes;
+    public RawToggle test;
+    public RawToggle diag;
+
+    Commands toCommands() {
+      boolean routesEnabled = routes != null ? routes.enabled() : Commands.DEFAULTS.routesEnabled();
+      boolean testEnabled = test != null ? test.enabled() : Commands.DEFAULTS.testEnabled();
+      boolean diagEnabled = diag != null ? diag.enabled() : Commands.DEFAULTS.diagEnabled();
+      return new Commands(routesEnabled, testEnabled, diagEnabled);
+    }
+  }
+
+  public static final class RawToggle {
+    public Boolean enabled;
+
+    boolean enabled() {
+      return enabled != null ? enabled : true;
+    }
+  }
+
+  public static final class RawPermissions {
+    public String admin;
+
+    Permissions toPermissions() {
+      return new Permissions(admin);
+    }
   }
 }

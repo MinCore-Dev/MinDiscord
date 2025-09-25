@@ -2,6 +2,7 @@ package dev.mindiscord.commands;
 
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import dev.mindiscord.core.AnnounceBusImpl;
+import dev.mindiscord.core.Config;
 import dev.mindiscord.core.MinDiscordRuntime;
 import java.time.Instant;
 import java.util.Map;
@@ -19,6 +20,17 @@ public final class MindiscordDiagCommand {
 
   private static int execute(ServerCommandSource source, MinDiscordRuntime runtime) {
     if (!CommandRegistrar.tryConsumeCooldown(source)) {
+      return 0;
+    }
+    Config cfg = runtime.config();
+    if (!cfg.core().enabled()) {
+      source.sendError(Text.literal("MinDiscord disabled via config"));
+      CommandRegistrar.logCommand(runtime, "diag", false, "DISABLED");
+      return 0;
+    }
+    if (!cfg.commands().diagEnabled()) {
+      source.sendError(Text.literal("Diag command disabled via config"));
+      CommandRegistrar.logCommand(runtime, "diag", false, "DISABLED");
       return 0;
     }
     AnnounceBusImpl.DiagnosticsSnapshot snapshot = runtime.diagnostics();

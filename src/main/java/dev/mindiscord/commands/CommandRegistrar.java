@@ -1,13 +1,16 @@
 package dev.mindiscord.commands;
 
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import dev.mindiscord.core.Config;
 import dev.mindiscord.core.MinDiscordRuntime;
+import dev.mindiscord.perms.Perms;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 
 public final class CommandRegistrar {
@@ -19,12 +22,22 @@ public final class CommandRegistrar {
   public static void registerAll(MinDiscordRuntime runtime) {
     CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
       LiteralArgumentBuilder<ServerCommandSource> root =
-          CommandManager.literal("mindiscord").requires(src -> src.hasPermissionLevel(2));
+          CommandManager.literal("mindiscord")
+              .requires(src -> hasAdminPermission(runtime, src));
       MindiscordRoutesCommand.register(root, runtime);
       MindiscordTestCommand.register(root, runtime);
       MindiscordDiagCommand.register(root, runtime);
       dispatcher.register(root);
     });
+  }
+
+  private static boolean hasAdminPermission(MinDiscordRuntime runtime, ServerCommandSource source) {
+    Config config = runtime.config();
+    String node = config.permissions().admin();
+    if (!(source.getEntity() instanceof ServerPlayerEntity player)) {
+      return source.hasPermissionLevel(2);
+    }
+    return Perms.check(player, node, 2);
   }
 
   static boolean tryConsumeCooldown(ServerCommandSource source) {

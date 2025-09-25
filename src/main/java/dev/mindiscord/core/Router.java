@@ -18,19 +18,22 @@ public final class Router {
     return table.get().resolve(requestedRoute);
   }
 
-  public List<RouteInfo> snapshot() { return table.get().snapshot(); }
+  public List<RouteInfo> snapshot() {
+    return table.get().snapshot();
+  }
 
   private record RouteTable(
       Map<String, Config.RouteDefinition> routes,
-      Config.RouteDefinition defaultRoute) {
+      Config.RouteDefinition defaultRoute,
+      boolean allowFallback) {
 
     static RouteTable empty() {
-      return new RouteTable(Map.of(), null);
+      return new RouteTable(Map.of(), null, false);
     }
 
     static RouteTable from(Config config) {
       Map<String, Config.RouteDefinition> copy = new LinkedHashMap<>(config.routes());
-      return new RouteTable(copy, copy.get("default"));
+      return new RouteTable(copy, copy.get("default"), config.announce().allowFallbackToDefault());
     }
 
     RouteResolution resolve(String requested) {
@@ -38,45 +41,72 @@ public final class Router {
       if (normalized == null || normalized.isBlank()) {
         normalized = "default";
       }
-      Config.RouteDefinition target = routes.get(normalized);
-      boolean fallback = false;
-      if (target == null && defaultRoute != null) {
-        target = defaultRoute;
-        fallback = !"default".equals(normalized);
+      Config.RouteDefinition direct = routes.get(normalized);
+      if (direct != null) {
+        String resolved = resolveTarget(direct);
+        if (resolved != null && !resolved.isBlank()) {
+          return success(normalized, direct, resolved, false);
+        }
+        if (allowFallback && !"default".equals(normalized)) {
+        RouteResolution fallbackResolution = attemptFallback(normalized);
+          if (fallbackResolution != null) {
+            return fallbackResolution;
+          }
+        }
+        return failure(normalized, direct);
       }
-      if (target == null) {
-        return new RouteResolution(
-            normalized,
-            null,
-            null,
-            Status.NO_ROUTE,
-            false,
-            null,
-            null,
-            false);
-      }
-      String resolved = resolveTarget(target);
-      if (resolved == null || resolved.isBlank()) {
-        Status status = target.environment() ? Status.ENV_MISSING : Status.NO_ROUTE;
-        return new RouteResolution(
-            normalized,
-            target.name(),
-            null,
-            status,
-            target.environment(),
-            target.envVariable(),
-            target.rawTarget(),
-            fallback);
+      if (allowFallback && !"default".equals(normalized)) {
+        RouteResolution fallbackResolution = attemptFallback(normalized);
+        if (fallbackResolution != null) {
+          return fallbackResolution;
+        }
       }
       return new RouteResolution(
           normalized,
-          target.name(),
-          resolved,
+          null,
+          null,
+          Status.NO_ROUTE,
+          false,
+          null,
+          null,
+          false);
+    }
+
+    private RouteResolution attemptFallback(String requested) {
+      if (defaultRoute == null) {
+        return null;
+      }
+      String resolved = resolveTarget(defaultRoute);
+      if (resolved == null || resolved.isBlank()) {
+        return null;
+      }
+      return success(requested, defaultRoute, resolved, true);
+    }
+
+    private static RouteResolution success(
+        String requested, Config.RouteDefinition definition, String url, boolean fallback) {
+      return new RouteResolution(
+          requested,
+          definition.name(),
+          url,
           fallback ? Status.FALLBACK : Status.OK,
-          target.environment(),
-          target.envVariable(),
-          target.rawTarget(),
+          definition.environment(),
+          definition.envVariable(),
+          definition.rawTarget(),
           fallback);
+    }
+
+    private static RouteResolution failure(String requested, Config.RouteDefinition definition) {
+      boolean env = definition.environment();
+      return new RouteResolution(
+          requested,
+          definition.name(),
+          null,
+          env ? Status.ENV_MISSING : Status.NO_ROUTE,
+          env,
+          definition.envVariable(),
+          definition.rawTarget(),
+          false);
     }
 
     private static String resolveTarget(Config.RouteDefinition def) {
@@ -114,8 +144,15 @@ public final class Router {
       String envVariable,
       String rawTarget,
       boolean fallback) {
-    public boolean ok() { return status == Status.OK || status == Status.FALLBACK; }
+    public boolean ok() {
+      return status == Status.OK || status == Status.FALLBACK;
+    }
   }
 
-  public enum Status { OK, FALLBACK, NO_ROUTE, ENV_MISSING }
+  public enum Status {
+    OK,
+    FALLBACK,
+    NO_ROUTE,
+    ENV_MISSING
+  }
 }
