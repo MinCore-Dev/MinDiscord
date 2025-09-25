@@ -43,12 +43,17 @@ msg.content = "✨ Rare drop: **Alex** got **Totem of True RNG** (mythic)";
 dev.mindiscord.api.MinDiscordApi.bus().ifPresent(bus -> bus.send("rareDrops", msg));
 ```
 
-## 3) Routes & fallbacks
+## 3) Routes, fallbacks & rate limits
 
-- Ask the server owner which routes exist (e.g., `eventAnnouncements`, `eventStarts`, `eventWinners`, `rareDrops`).  
-- If you pass an unknown route and the server has a `default`, MinDiscord will **fallback** to `default` and your `SendResult.code` will be `BAD_ROUTE_FALLBACK`.
+- Ask the server owner which routes exist (e.g., `eventAnnouncements`, `eventStarts`, `eventWinners`, `rareDrops`).
+- Routes may point at fixed URLs or `env:VARNAME` placeholders. If the environment variable is missing you will receive
+  `BAD_ROUTE` (nothing is sent).
+- Unknown routes fall back to `default` (when configured) and produce `BAD_ROUTE_FALLBACK`. The payload is delivered via the
+  default route so you can log and notify ops.
+- MinDiscord maintains a per-route token bucket. Bursts over the configured capacity are queued until tokens refill; if the
+  queue is full your send completes with `QUEUE_FULL`.
 
-## 4) Handling results
+## 4) Handling results & retries
 
 ```java
 bus.send("eventAnnouncements", "hello").thenAccept(result -> {
@@ -58,17 +63,24 @@ bus.send("eventAnnouncements", "hello").thenAccept(result -> {
 });
 ```
 
-Possible codes: `OK`, `BAD_ROUTE_FALLBACK`, `QUEUE_FULL`, `BAD_PAYLOAD`, `BAD_ROUTE`, `DISCORD_429`, `DISCORD_5XX`, `NETWORK_IO`, `GIVE_UP`.
+Possible codes: `OK`, `BAD_ROUTE_FALLBACK`, `BAD_ROUTE`, `BAD_PAYLOAD`, `QUEUE_FULL`, `DISCORD_429`, `DISCORD_5XX`,
+`NETWORK_IO`, `GIVE_UP`.
+
+- `SendResult.requestId()` is a UUID; ops can correlate it with MinCore ledger entries (`idemKey = "send:" + requestId`).
+- Retries are handled for you. After `maxAttempts` MinDiscord gives up with `GIVE_UP` and includes the last failure reason in
+  the message.
 
 ## 5) Threading
 
 All sends are asynchronous and off the server main thread. You can call MinDiscord from anywhere; do not block waiting for the future unless you’re on a worker thread.
 
-## 6) Tips
+## 6) Payload limits & tips
 
 - Keep `content` ≤ 2000 chars.
 - Use embeds for rich formatting; stay within Discord’s limits.
 - Avoid `@everyone`/role pings unless the server owner requested it. Configure mentions in MinDiscord routing if needed.
+- Max 10 embeds per message, 25 fields per embed, field names ≤256 chars, values ≤1024 chars, footer text ≤2048 chars,
+  author names ≤256 chars. MinDiscord validates these limits and returns `BAD_PAYLOAD` if exceeded.
 
 
 ## Dependency Notes

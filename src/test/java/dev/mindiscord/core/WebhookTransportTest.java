@@ -9,12 +9,7 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.concurrent.Executors;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -56,19 +51,10 @@ public class WebhookTransportTest {
     var port = server.getAddress().getPort();
     var url = "http://127.0.0.1:" + port + "/api/webhooks/test";
 
-    var client = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(3))
-        .build();
-
-    var json = "{\"content\":\"Hello from MinDiscord\"}";
-    var req = HttpRequest.newBuilder(URI.create(url))
-        .timeout(Duration.ofSeconds(5))
-        .header("Content-Type", "application/json")
-        .POST(HttpRequest.BodyPublishers.ofString(json))
-        .build();
-
-    HttpResponse<Void> resp = client.send(req, HttpResponse.BodyHandlers.discarding());
-    assertTrue(resp.statusCode() >= 200 && resp.statusCode() < 300, "Expected 2xx status");
+    WebhookTransport transport = new WebhookTransport();
+    var resp = transport.postJson(url, "{\"content\":\"Hello from MinDiscord\"}");
+    assertTrue(resp.success(), "Expected transport success");
+    assertEquals(204, resp.statusCode());
     assertEquals("/api/webhooks/test", lastPath);
     assertNotNull(lastBody);
     assertTrue(lastBody.contains("\"content\""));

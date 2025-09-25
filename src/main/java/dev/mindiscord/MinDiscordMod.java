@@ -1,25 +1,18 @@
 package dev.mindiscord;
 
 import dev.mindiscord.api.MinDiscordApi;
-import dev.mindiscord.core.AnnounceBusImpl;
-import dev.mindiscord.core.Router;
-import dev.mindiscord.core.WebhookTransport;
-import dev.mindiscord.core.Config;
-import dev.mindiscord.core.ConfigLoader;
+import dev.mindiscord.core.MinDiscordRuntime;
 import net.fabricmc.api.ModInitializer;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 public final class MinDiscordMod implements ModInitializer {
+  private static final Logger LOGGER = LogManager.getLogger("MinDiscord");
+
   @Override public void onInitialize() {
-    // Load config (creates example file if missing)
-    Config cfg = ConfigLoader.loadOrCreate();
-    Router router = new Router(cfg);
-    WebhookTransport transport = new WebhookTransport();
-    AnnounceBusImpl bus = new AnnounceBusImpl(router, transport, cfg);
-
-    // Install for discovery
-    MinDiscordApi.install(bus);
-
-    dev.mindiscord.commands.CommandRegistrar.registerAll(); // stub registration
-    System.out.println("[MinDiscord] Initialized (skeleton)");
+    MinDiscordRuntime runtime = MinDiscordRuntime.init();
+    MinDiscordApi.install(runtime.bus());
+    dev.mindiscord.commands.CommandRegistrar.registerAll(runtime);
+    LOGGER.info("MinDiscord initialized");
   }
 }

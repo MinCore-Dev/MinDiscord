@@ -23,6 +23,8 @@ dependencies {
   mappings "net.fabricmc:yarn:${mappings}:v2"
   modImplementation "net.fabricmc:fabric-loader:${fabricLoaderVersion}"
   modImplementation "net.fabricmc.fabric-api:fabric-api:${fabricApiVersion}"
+  implementation 'org.hjson:hjson:3.0.0'
+  implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.2'
   // MinCore is a hard dependency declared in fabric.mod.json and Modrinth metadata.
   // DO NOT ship MinCore inside this jar.
 }

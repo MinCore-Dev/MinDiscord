@@ -1,39 +1,42 @@
 package dev.mindiscord.core;
 
 import static org.junit.jupiter.api.Assertions.*;
-import java.util.LinkedHashMap;
 import org.junit.jupiter.api.Test;
 
 public class RouterTest {
 
   @Test
   void resolvesDefaultWhenRouteNullOrBlank() {
-    Config cfg = new Config();
-    cfg.routes = new LinkedHashMap<>();
-    cfg.routes.put("default", "http://example/default");
-    Router r = new Router(cfg);
-    assertEquals("http://example/default", r.resolve(null));
-    assertEquals("http://example/default", r.resolve(""));
-    assertEquals("http://example/default", r.resolve("   "));
+    Config cfg =
+        Config.builder().putRoute("default", "http://example/default").build();
+    Router r = new Router();
+    r.update(cfg);
+    assertEquals("http://example/default", r.resolve(null).url());
+    assertEquals("http://example/default", r.resolve("").url());
+    assertEquals("http://example/default", r.resolve("   ").url());
   }
 
   @Test
   void fallsBackToDefaultWhenUnknownRoute() {
-    Config cfg = new Config();
-    cfg.routes = new LinkedHashMap<>();
-    cfg.routes.put("default", "http://example/default");
-    cfg.routes.put("known", "http://example/known");
-    Router r = new Router(cfg);
-    assertEquals("http://example/default", r.resolve("unknown-route"));
-    assertEquals("http://example/known", r.resolve("known"));
+    Config cfg =
+        Config.builder()
+            .putRoute("default", "http://example/default")
+            .putRoute("known", "http://example/known")
+            .build();
+    Router r = new Router();
+    r.update(cfg);
+    assertEquals("http://example/default", r.resolve("unknown-route").url());
+    assertEquals("http://example/known", r.resolve("known").url());
+    assertEquals(Router.Status.FALLBACK, r.resolve("unknown-route").status());
   }
 
   @Test
   void returnsNullWhenUnknownAndNoDefault() {
-    Config cfg = new Config();
-    cfg.routes = new LinkedHashMap<>();
-    cfg.routes.put("known", "http://example/known");
-    Router r = new Router(cfg);
-    assertNull(r.resolve("unknown"));
+    Config cfg = Config.builder().putRoute("known", "http://example/known").build();
+    Router r = new Router();
+    r.update(cfg);
+    Router.RouteResolution res = r.resolve("unknown");
+    assertNull(res.url());
+    assertEquals(Router.Status.NO_ROUTE, res.status());
   }
 }
