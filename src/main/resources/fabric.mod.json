@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "mindiscord",
+  "version": "${version}",
+  "name": "MinDiscord",
+  "environment": "server",
+  "license": "MIT",
+  "authors": ["YourName"],
+  "description": "Discord webhook announcer with routing and MinCore integration.",
+  "entrypoints": { "main": ["dev.mindiscord.MinDiscordMod"] },
+  "depends": {
+    "fabricloader": ">=0.17.2",
+    "minecraft": "${minecraft_version}",
+    "fabric-api": "*",
+    "mincore": ">=0.2.0"
+  },
+  "contact": { "sources": "https://github.com/your/repo" }
+}

@@ -1,0 +1,73 @@
+plugins {
+  id 'java'
+  id 'fabric-loom' version '1.11-SNAPSHOT'
+  id 'com.modrinth.minotaur' version '2.8.7' apply true
+}
+
+group = project.group
+version = project.modVersion
+
+java {
+  toolchain { languageVersion = JavaLanguageVersion.of(project.javaVersion as int) }
+  withJavadocJar()
+  withSourcesJar()
+}
+
+repositories {
+  mavenCentral()
+  // TODO: Add MinCore's Maven repo if published; do NOT bundle MinCore.
+}
+
+dependencies {
+  minecraft "com.mojang:minecraft:${minecraftVersion}"
+  mappings "net.fabricmc:yarn:${mappings}:v2"
+  modImplementation "net.fabricmc:fabric-loader:${fabricLoaderVersion}"
+  modImplementation "net.fabricmc.fabric-api:fabric-api:${fabricApiVersion}"
+  // MinCore is a hard dependency declared in fabric.mod.json and Modrinth metadata.
+  // DO NOT ship MinCore inside this jar.
+}
+
+// ---------- Modrinth publishing (template) ----------
+// Usage:
+// 1) Put MODRINTH_TOKEN in your CI env or ~/.gradle/gradle.properties (modrinthToken=...)
+// 2) Set projectId/versionNumber/changelog below or via -P props
+// 3) Run: ./gradlew modrinth
+modrinth {
+  token = project.findProperty("modrinthToken") ?: System.getenv("MODRINTH_TOKEN")
+  projectId = project.findProperty("modrinthProjectId") ?: "REPLACE_WITH_MIN_DISCORD_PROJECT_ID"
+  versionNumber = project.modVersion
+  versionName = "MinDiscord ${project.modVersion}"
+  changelog = project.findProperty("modChangelog") ?: "Initial release"
+  uploadFile = tasks.remapJar
+  gameVersions = [ project.minecraftVersion ]
+  loaders = [ "fabric" ]
+  dependencies {
+    // Required dependency on MinCore (Modrinth project id)
+    required.project(project.findProperty("modrinthMinCoreId") ?: "REPLACE_WITH_MINCORE_PROJECT_ID")
+  }
+}
+
+tasks.withType(JavaCompile).configureEach {
+  options.release = project.javaVersion as int
+  options.encoding = 'UTF-8'
+}
+
+loom {
+  runs {
+    server {
+      server()
+      name "MinDiscord Dev Server"
+      vmArg "-Dfabric.log.level=info"
+    }
+  }
+}
+
+
+dependencies {
+  testImplementation platform("org.junit:junit-bom:5.10.2")
+  testImplementation "org.junit.jupiter:junit-jupiter"
+}
+
+tasks.test {
+  useJUnitPlatform()
+}

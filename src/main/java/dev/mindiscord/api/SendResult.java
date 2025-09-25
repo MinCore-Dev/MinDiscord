@@ -1,0 +1,1 @@
+package dev.mindiscord.api; public record SendResult(boolean ok, String code, String message, String requestId) {}

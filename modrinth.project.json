@@ -1,0 +1,17 @@
+{
+  "project_id": "REPLACE_WITH_MIN_DISCORD_PROJECT_ID",
+  "version_number": "0.3.1",
+  "loaders": [
+    "fabric"
+  ],
+  "game_versions": [
+    "1.21.8"
+  ],
+  "changelog": "Initial release",
+  "dependencies": [
+    {
+      "project_id": "REPLACE_WITH_MINCORE_PROJECT_ID",
+      "dependency_type": "required"
+    }
+  ]
+}
